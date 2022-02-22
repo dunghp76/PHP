@@ -1,0 +1,439 @@
+<?php
+
+/**
+ * Process api up price
+ *
+ * @package 
+ * @subpackage upprice
+ * @copyright Copyright (c) Corporation. All Rights Reserved.
+ * @author f5>
+ */
+
+namespace daito\inventory;
+
+require __DIR__ . "/../autoload.inc";
+
+use daito\common\Common;
+use daito\common\DbConnect;
+use daito\common\FileMoveFtp;
+class PsApiUpPrice extends DbConnect
+{
+    /**
+     * @var string $database , database name
+     */
+    private $database = "naviplus";
+    
+    private $sizeInsert = 500;
+    
+    private $limitCsvRakuten = 50000;
+    
+    private $limitCsvYahoo = 50000;
+
+    private $limitCsvWowma = 10000;
+    
+    /**
+     * Construct connect mysql
+     * @param string $database name of database
+     */
+    public function __construct($database = null)
+    {
+        if ($database !== null) {
+            $this->database = $database;
+        }
+        parent::__construct($this->database);
+    }
+    public function countFileType($typeFile){
+        $files = glob(FTP_RAK_ALL_DIR . DIRECTORY_SEPARATOR .  '*');
+        usort($files, function($a,$b){ return   filemtime($a)-filemtime($b);});
+        if(count($files)==0){
+            return 0;
+        }
+        $count = 0;
+        foreach ($files as $myFile){
+            $basenameWithExt = pathinfo($myFile)['basename'];
+            if (strpos($basenameWithExt,$typeFile ) !== false) {
+                $count++;
+            }
+        }
+        return $count;
+
+    }
+    /**
+     * Get product upload csv
+     *
+     * @param  string  $dir
+     * @return array
+     */
+    public function exportCsvRakutenUpload($dir)
+    {
+
+        $countPriceFile = Common::countFileType("PRICE");
+        if($countPriceFile >0){
+            print_r("Stop export exportCsvRakutenUpload..{$countPriceFile} files" . PHP_EOL);
+            return true;
+        }
+        if(!Common::checkExistItemOnRak()){
+            print_r("Stop export exportCsvRakutenUpload..exist files" . PHP_EOL);
+            return true;
+        }
+
+
+
+        $dir   = str_replace("\\", "/", $dir);
+        $count = 0;
+        $index = 0;
+        do {
+            $curTime = date('His');
+            $file   = $dir . '/' . 'item' . $curTime . '.csv';
+            $query  = "
+            SELECT 
+            LIMIT {$this->limitCsvRakuten}";
+            
+            $result = $this->executeSelectQuery($query);
+            $count  = count($result);
+            if ($count === 0) {
+                break;
+            }
+		// mall.is_r_update = 1
+            $arrUpdate = [];
+            $file = fopen($file, 'a');
+            $head = '"コントロールカラム","商品管理番号（商品URL）","商品番号","販売価格","送料","倉庫指定"';
+            fputs($file, mb_convert_encoding($head, 'Shift-JIS', 'UTF-8'). "\r\n");
+            foreach ($result as $item) {
+                $arrUpdate[] = $item['商品番号'];
+                $column = '"' . implode('","', $item) . '"';
+                fputs($file, mb_convert_encoding($column, 'Shift-JIS', 'UTF-8'). "\r\n");
+            }
+            fclose($file);
+            if (count($arrUpdate) > 0) {
+                $arrUpdate = array_chunk($arrUpdate, $this->sizeInsert);
+                foreach ($arrUpdate as $arr) {
+                    $this->updateDataUpload($arr, 'is_r_update');
+                }
+            }
+            $index++;
+        } while ($count > 0);
+        return true;
+    }
+    
+    /**
+     * Export CSV Yahoo upload
+     *
+     * @param  string   $dir
+     * @return boolean
+     */
+    public function exportCsvYahooUpload($dir)
+    {
+/*         $files = glob($dir . DIRECTORY_SEPARATOR . '*');
+        foreach ($files as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        } */
+        $dir     = str_replace("\\", "/", $dir);
+        $index   = 0;
+        $count   = 0;
+        do {
+            $curTime   = date('His');
+         //   $fileLower = $dir . '/' . 'data_spy_lower' . $curTime . '.csv';
+            $fileUpper = $dir . '/' . 'data_spy_upper' . $curTime . '.csv';
+            $query   = "
+            SQL commnad
+            LIMIT {$this->limitCsvYahoo}";
+            
+            $result = $this->executeSelectQuery($query);
+            $count  = count($result);
+            if ($count === 0) {
+                break;
+            }
+            $arrUpdate = [];
+          //  $fileLower = fopen($fileLower, 'a');
+            $fileUpper = fopen($fileUpper, 'a');
+            $head      = '"code","price","sale-price","delivery","display"';
+           // fputs($fileLower, mb_convert_encoding($head, 'Shift-JIS', 'UTF-8'). "\r\n");
+            fputs($fileUpper, mb_convert_encoding($head, 'Shift-JIS', 'UTF-8'). "\r\n");
+            foreach ($result as $item) {
+                $arrUpdate[]  = $item['code'];
+           /*   $item['code'] = strtolower($item['code']);
+                $columnLower  = '"' . implode('","', $item) . '"';
+                fputs($fileLower, mb_convert_encoding($columnLower, 'Shift-JIS', 'UTF-8'). "\r\n");*/
+                
+              //  $item['code'] = strtoupper($item['code']);
+                $columnUpper  = '"' . implode('","', $item) . '"';
+                fputs($fileUpper, mb_convert_encoding($columnUpper, 'Shift-JIS', 'UTF-8'). "\r\n");
+            }
+         //   fclose($fileLower);
+            fclose($fileUpper);
+            if (count($arrUpdate) > 0) {
+                $arrUpdate = array_chunk($arrUpdate, $this->sizeInsert);
+                foreach ($arrUpdate as $arr) {
+                    $this->updateDataUpload($arr, 'is_y_update');
+		           // nvtrong comment $this->updateProductBaseForWowma($arr,'is_update_flag_wow');
+                }
+            }
+            $index++;
+        } while ($count > 0);
+        return true;
+    }
+
+    /**
+     * Set flag for wowma
+     *
+     * @param  array   $productCodes
+     * @return boolean
+     */
+    public function updateProductBaseForWowma($productCodes,$column)
+    {
+        $strPC = "'" . implode("','", $productCodes) . "'";
+        $query = "
+            UPDATE
+                master
+            SET
+                $column = 1
+            WHERE
+                product_code IN ($strPC)";
+        return $this->executeUpdateQuery($query);
+    }
+
+    /**
+     * Update data upload
+     *
+     * @param  array   $productCodes
+     * @param  string  $column
+     * @return boolean
+     */
+    public function updateDataUpload($productCodes, $column)
+    {
+        $strPC = "'" . implode("','", $productCodes) . "'";
+        $query = "
+            UPDATE
+                master
+            SET
+                $column = 0
+            WHERE
+                product_code IN ($strPC)";
+        return $this->executeUpdateQuery($query);
+    }
+    
+    /**
+     * Process upprice rakuten
+     *
+     * @return boolean
+     */
+    public function processUpRak()
+    {
+        FileMoveFtp::processUpRakMove('RAK_FTP_UPPRICE_DIR');
+
+        /**
+        $files = glob(RAK_FTP_UPLOAD_DIR . DIRECTORY_SEPARATOR . '*');
+        if (count($files) === 0) {
+            print_r("No csv rakuten to upload" . PHP_EOL);
+            return false;
+        }
+        $configRak = [
+            'server'       => RAK_FTP_SERVER,
+            'port'         => RAK_FTP_PORT,
+            'user'         => RAK_FTP_USER,
+            'pass'         => RAK_FTP_PASS,
+            'server_path'  => RAK_FTP_SERVER_PATH,
+            'upprice_path' => $files[0]
+        ];
+
+        if (!$this->uploadCSV($configRak)) {
+            return false;
+        } else {
+            $fileBackup = date('Ymd') . '_' . date('His') . '.csv';
+            $backupPath = RAK_FTP_BACKUP_DIR . DIRECTORY_SEPARATOR . $fileBackup;
+            rename($files[0], $backupPath);
+            if (is_file($files[0])) {
+                unlink($files[0]);
+            }
+        }
+        return true;
+         **/
+    }
+    
+    /**
+     * Process upload price yahoo
+     *
+     * @return boolean
+     */
+    public function processUpYah()
+    {
+        FileMoveFtp::processUpYahMoveNew("YAH_FTP_UPPRICE_DIR");
+        /*
+        $files = glob(YAH_FTP_UPLOAD_DIR . DIRECTORY_SEPARATOR . '*');
+        if (count($files) === 0) {
+            print_r("No csv yahoo to upload" . PHP_EOL);
+            return false;
+        }
+        
+        $curDate   = date('YmdHi00');
+        $fileName  = "data_spy{$curDate}.csv";
+        $configYah = [
+            'server'       => YAH_FTP_SERVER,
+            'port'         => YAH_FTP_PORT,
+            'user'         => YAH_FTP_USER,
+            'pass'         => YAH_FTP_PASS,
+            'server_path'  => YAH_FTP_SERVER_DIR . '/' . $fileName,
+            'upprice_path' => $files[0]
+        ];
+        
+        if (!$this->uploadCSV($configYah)) {
+            return false;
+        } else {
+            $fileBackup = date('Ymd') . '_' . date('His') . '.csv';
+            $backupPath = YAH_FTP_BACKUP_DIR . DIRECTORY_SEPARATOR . $fileBackup;
+            rename($files[0], $backupPath);
+            if (is_file($files[0])) {
+                unlink($files[0]);
+            }
+        }
+        return true;
+        */
+    }
+        /**
+     * Process upprice wowma
+     *
+     * @return boolean
+     */
+   public function processUpWowma()
+    {
+        FileMoveFtp::processUpYahMoveNew("WOW_FTP_UPLOAD_DIR");
+        /***
+        $files = glob(WOW_FTP_UPLOAD_DIR . DIRECTORY_SEPARATOR . '*');
+        if (count($files) === 0) {
+            print_r("No csv wowma to upload" . PHP_EOL);
+            return false;
+        }
+        $configWow = [
+            'server'       => WOW_FTP_SERVER,
+            'port'         => WOW_FTP_PORT,
+            'user'         => WOW_FTP_USER,
+            'pass'         => WOW_FTP_PASS,
+            'server_path'  => WOW_FTP_SERVER_PATH,
+            'upprice_path' => $files[0]
+        ];
+
+        if (!$this->uploadCSV($configWow)) {
+            return false;
+        } else {
+            $fileBackup = date('Ymd') . '_' . date('His') . '.csv';
+            $backupPath = WOW_FTP_BACKUP_DIR . DIRECTORY_SEPARATOR . $fileBackup;
+            rename($files[0], $backupPath);
+            if (is_file($files[0])) {
+                unlink($files[0]);
+            }
+        }
+        return true;
+         ***/
+    }
+    
+    /**
+     * Process upload price
+     *
+     * @param  array   $config
+     * @return boolean
+     */
+    private function uploadCSV($config)
+    {
+        if (!file_exists($config['upprice_path'])) {
+            print_r("No file upload." . PHP_EOL);
+            return false;
+        }
+        $connId = ftp_connect($config['server'], $config['port']);
+        $loginRes = ftp_login($connId, $config['user'], $config['pass']);
+        ftp_pasv($connId, true);
+        if (ftp_put($connId, $config['server_path'], $config['upprice_path'], FTP_BINARY)) {
+            return true;
+        } else {
+            print_r("Upload file fail." . PHP_EOL);
+            return false;
+        }
+    }
+}
+
+if (!isset($argv[1]) || !in_array($argv[1], ['upload', 'export'])) {
+    print_r("Param is invalid" . PHP_EOL);
+    exit;
+}
+$start = strtotime("now");
+$ps    = new PsApiUpPrice();
+
+if ($argv[1] === 'upload') {
+    if (!isset($argv[2]) || !in_array($argv[2], ['rakuten', 'yahoo','wowma'])) {
+        print_r("Param is invalid" . PHP_EOL);
+        exit;
+    }
+    if ($argv[2] === 'rakuten') {
+        $pid = FTP_UPPRICE_DIR . DIRECTORY_SEPARATOR . 'rakuten' . DIRECTORY_SEPARATOR . 'process.pid';
+        if (is_file($pid)) {
+            print_r("Process calculate price is running" . PHP_EOL);
+            exit;
+        }
+        $result = $ps->processUpRak();
+        if ($result !== false) {
+            print_r("Process upload rakuten success in " . (strtotime("now") - $start) . " seconds\n");
+        } else {
+            print_r("Process upload rakuten fail in " . (strtotime("now") - $start) . " seconds\n");
+        }
+    } elseif ($argv[2] === 'yahoo') {
+        $pid = FTP_UPPRICE_DIR . DIRECTORY_SEPARATOR . 'yahoo' . DIRECTORY_SEPARATOR . 'process.pid';
+        if (is_file($pid)) {
+            print_r("Process calculate price is running" . PHP_EOL);
+            exit;
+        }
+        $result = $ps->processUpYah();
+        if ($result !== false) {
+            print_r("Process upload yahoo success in " . (strtotime("now") - $start) . " seconds\n");
+        } else {
+            print_r("Process upload yahoo fail in " . (strtotime("now") - $start) . " seconds\n");
+        }
+    }elseif ($argv[2] === 'wowma') {
+            $pid = FTP_UPPRICE_DIR . DIRECTORY_SEPARATOR . 'wowma' . DIRECTORY_SEPARATOR . 'process.pid';
+            if (is_file($pid)) {
+                print_r("Process calculate price is running" . PHP_EOL);
+                exit;
+            }
+            $result = $ps->processUpWowma();
+            if ($result !== false) {
+                print_r("Process upload wowma success in " . (strtotime("now") - $start) . " seconds\n");
+            } else {
+                print_r("Process upload wowma fail in " . (strtotime("now") - $start) . " seconds\n");
+            }
+    }
+} elseif ($argv[1] === 'export') {
+    if ($argv[2] === 'rakuten') {
+        $pid = FTP_UPPRICE_DIR . DIRECTORY_SEPARATOR . 'rakuten' . DIRECTORY_SEPARATOR . 'process.pid';
+        file_put_contents($pid, date('Y-m-d H:i:s'));
+        $curdate = date('Y-m-d H:i:s');
+        print_r("Start export csv Rakuten at $curdate" . PHP_EOL);
+        if (!$ps->exportCsvRakutenUpload(RAK_FTP_UPLOAD_DIR)) {
+            print_r("Export csv rakuten fail" . PHP_EOL);
+            if (is_file($pid)) {
+                unlink($pid);
+            }
+            return false;
+        }
+        if (is_file($pid)) {
+            unlink($pid);
+        }
+    } elseif ($argv[2] === 'yahoo') {
+        $pid = FTP_UPPRICE_DIR . DIRECTORY_SEPARATOR . 'yahoo' . DIRECTORY_SEPARATOR . 'process.pid';
+        file_put_contents($pid, date('Y-m-d H:i:s'));
+        $curdate = date('Y-m-d H:i:s');
+        print_r("Start export csv Yahoo at $curdate" . PHP_EOL);
+        if (!$ps->exportCsvYahooUpload(YAH_FTP_UPLOAD_DIR)) {
+            print_r("Export csv yahoo fail" . PHP_EOL);
+            if (is_file($pid)) {
+                unlink($pid);
+            }
+            return false;
+        }
+        if (is_file($pid)) {
+            unlink($pid);
+        }
+    }  elseif ($argv[2] === 'wowma') {
+
+    }
+}
