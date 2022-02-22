@@ -1,0 +1,176 @@
+<?php
+
+/**
+ * Process delete records
+ *
+ * @package 
+ * @subpackage delete records
+ * @copyright Copyright (c) 2022  daito! Corporation. All Rights Reserved.
+ * @author f5 >
+ */
+namespace data\sales;
+
+require __DIR__ . "/../autoload.inc";
+
+use data\pricing_method\common\DbConnectGpc;
+
+function echoNL($msg)
+{
+    $dateT = date("Y-m-d H:i:s") . "  ";
+    if (is_array($msg)) {
+        echo $dateT . "\n";
+        var_dump($msg);
+    } else {
+        echo $dateT . $msg . "\n";
+    }
+}
+class DeleteRecords extends DbConnectGpc
+{
+    /**
+     * @var string $database , database name
+     */
+    private $database = "sales";
+    private $deleteLimit = "30000";
+    /**
+     * Construct connect mysql
+     * @param string $database name of database
+     */
+    public function __construct($database = null)
+    {
+        if ($database !== null) {
+            $this->database = $database;
+        }
+        parent::__construct($this->database);
+    }
+    /**
+     * Get data list
+     * @param deleteTableName
+     * @param  string
+     * @return array
+     */
+    public function delete_table($deleteTableName, $fieldName, $conditionField)
+    {
+        $start = microtime(true);
+        echoNL("Start delete " . $deleteTableName);
+        $count = 0;
+        $index = 0;
+        $totalDeleted = 0;
+        do {
+            $query = "
+            SELECT $fieldName as product_code
+            from $deleteTableName
+            where date($conditionField) < date_sub(current_date,interval 1 month)
+	        limit 30000
+	        ";
+
+            $result = $this->executeSelectQuery($query);
+            $count = count($result);
+            if ($count === 0) {
+                break;
+            }
+            $totalDeleted = $totalDeleted + $count;
+            $arrRecordsList = [];
+            // add records to array delete
+            if (count($arrRecordsList) > 0) {
+                foreach ($result as $item) {
+                    $arrRecordsList[] = $item['product_code'];
+                }
+            }
+            // delete begin
+            if (count($arrRecordsList) > 0) {
+                $arrRecordsList = array_chunk($arrRecordsList, $this->deleteLimit);
+                foreach ($arrRecordsList as $arr) {
+                    $this->deleteData($deleteTableName, $fieldName, $arr);
+                }
+            }
+            unset($arrRecordsList);$arrRecordsList=null;
+            $index++;
+            echoNL("Run time $index");
+            if ($index == 3) {
+                break;
+            }
+
+        } while ($count > 0);
+        $spendTime = round(microtime(true) - $start, 2);
+        // write logs
+        echoNL("Record  deleted: " . $totalDeleted);
+        echoNL("Done delete " . $deleteTableName . " With spend time:" . $spendTime);
+
+        return true;
+    }
+    //******************高すぎアホ価格を削除する *************** */
+    /**
+     * Get data list
+     * @param deleteTableName
+     * @param  string
+     * @return array
+     */
+    public function delete_table_price_expensive($deleteTableName)
+    {
+        $start = microtime(true);
+        echoNL("Start delete " . $deleteTableName);
+        $count = 0;
+        $index = 0;
+        $totalDeleted = 0;
+        do {
+            $query = "
+            SQL command
+	        limit 30000
+	        ";
+
+            $result = $this->executeSelectQuery($query);
+            $count = count($result);
+            if ($count === 0) {
+                break;
+            }
+            $totalDeleted = $totalDeleted + $count;
+            $arrRecordsList = [];
+            // add records to array delete
+            foreach ($result as $item) {
+                $arrRecordsList[] = $item['product_code'];
+            }
+            // delete begin
+            if (count($arrRecordsList) > 0) {
+                $arrRecordsList = array_chunk($arrRecordsList, $this->deleteLimit);
+                foreach ($arrRecordsList as $arr) {
+                    $this->deleteData($deleteTableName, 'seq_no', $arr);
+                }
+            }
+            unset($arrRecordsList);$arrRecordsList=null;
+
+            $index++;
+            echoNL("Run time $index");
+            if ($index == 3) {
+                break;
+            }
+
+        } while ($count > 0);
+        $spendTime = round(microtime(true) - $start, 2);
+        // write logs
+        echoNL("Record  deleted: " . $totalDeleted);
+        echoNL("Done delete " . $deleteTableName . " With spend time:" . $spendTime);
+        return true;
+    }
+    //====================
+    /**
+     * Delete data
+     * @param  array   $productCode
+     * @param  string  $tableName
+     * @return boolean
+     */
+    public function deleteData($tableName, $columnKey, $productCode)
+    {
+        $strPC = "'" . implode("','", $productCode) . "'";
+        $query = "
+            delete from
+                $tableName
+            WHERE
+                {$columnKey} IN ($strPC)";
+
+        return $this->executeUpdateQuery($query);
+    }
+}
+// ===============call delete
+$delData = new DeleteRecords();
+$delData->delete_table('amazon__log', 'seq_no', 'change_date');
+$delData->delete_table_price_expensive('table name', 'seq_no');
