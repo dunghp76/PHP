@@ -1,0 +1,246 @@
+<?php
+/**
+ * Connect db by pdo
+ *
+ * @package 
+ * @subpackage common
+ * @copyright Copyright (c) 2022 daito! Corporation. All Rights Reserved.
+ * @author f5 >
+ */
+namespace data\pricing_method\common;
+const URL_SLACK='';
+const  TOKEN_SLACK='';
+const CHANNEL_ERROR='';
+const USERNAME='';
+/**
+ * class DbConnectGpc
+ *
+ */
+class DbConnectGpc
+{
+    /**
+     * @var string $db , database of mysql
+     */
+    protected $dbname = 'sales';
+    public $connect;
+    protected $host = "";
+    protected $user = "";
+    protected $port = "";
+    protected $pass = "";
+    /**
+     * Construct connect mysql
+     * @param string host database
+     * @param string $dbname name of database
+     * @return mixed return object connect database
+     */
+    public function __construct($dbname = null)
+    {
+        /* $servername = "";
+        $username = "";
+        $password = "";
+        $dbname = "";*/
+        //db test,
+        // $this->connect = new \PDO($this->host,$this->dbname,$this->port, $this->user, $this->pass);
+	$this->connect = new \PDO("mysql:host=;dbname=sales;port=3306", "", "");
+        $this->connect->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $this->connect->setAttribute(\PDO::MYSQL_ATTR_INIT_COMMAND, 'SET NAMES utf8');
+    }
+    public function placeholders($text, $count=0, $separator=","){
+        $result = array();
+        if($count > 0){
+            for($x=0; $x<$count; $x++){
+                $result[] = $text;
+            }
+        }
+
+        return implode($separator, $result);
+    }
+    /**
+     * Reconect database
+     * @return mixed return object connect database
+     */
+    public function reconnect()
+    {
+        $servername = "";
+        $username = "";
+        $password = "";
+        $dbname = "";
+        //db test
+        $this->connect = new \PDO("mysql:host=;dbname=;port=", "", "");
+        $this->connect->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $this->connect->setAttribute(\PDO::MYSQL_ATTR_INIT_COMMAND, 'SET NAMES utf8');
+    }
+    /**
+     * Exe sql query select
+     * @param string $query query sql
+     * @return mixed return object connect database
+     */
+    public function executeSelectQuery($query)
+    {
+        if ($this->connect === null) {
+            $this->reconnect();
+        }
+        $sth = $this->connect->prepare($query);
+        if ($sth->execute()) {
+            $result = $sth->fetchAll(\PDO::FETCH_ASSOC);
+            return $result;
+        } else {
+            return array();
+        }
+    }
+
+    /**
+     * Exe sql for insert
+     * @param string $query query sql
+     * @param int $flgEffect show effected row total
+     * @return boolean
+     */
+    public function executeInsertQuery($query, $flgEffect = 0)
+    {
+        try {
+            if ($this->connect === null) {
+                $this->reconnect();
+            }
+            $sth = $this->connect->prepare($query);
+            $check = $sth->execute();
+            if ($check) {
+                if ($flgEffect === 1) {
+                    return $sth->rowCount();
+                } else {
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        } catch (\PDOException $e) {
+            $message = $e->getMessage();
+            $infoApi = array(
+                'url'       => URL_SLACK,
+                'token'     => TOKEN_SLACK,
+                'channel'   => CHANNEL_ERROR,
+                'username'  => USERNAME
+            );
+            $common = new \daito\common\Common;
+            $error = error_get_last();
+            if ($error !== null) {
+                $infoApi['text']  = "File error : {$_SERVER['PHP_SELF']}\n";
+                $infoApi['text'] .= "Message error : {$message}\n";
+                $infoApi['text'] .= "====================================\n";
+                print_r($common->postMessage($infoApi));
+            }
+            $this->connect = null;
+            return false;
+        }
+    }
+    /**
+     * Exe sql for delete sql
+     * @param string $query query sql
+     * @return boolean
+     */
+    public function executeDeleteQuery($query)
+    {
+        if ($this->connect === null) {
+            $this->reconnect();
+        }
+        return $this->executeInsertQuery($query);
+    }
+    /**
+     * Exe sql for update sql
+     * @param string $query query sql
+     * @param int $flgEffect show effected row total
+     * @return boolean
+     */
+    public function executeUpdateQuery($query, $flgEffect = 0)
+    {
+        try {
+            $this->reconnect();
+            $sth = $this->connect->prepare($query);
+            $check = $sth->execute();
+            if ($check) {
+                if ($flgEffect === 1) {
+                    return $sth->rowCount();
+                }
+                return true;
+            } else {
+                return false;
+            }
+        } catch (\PDOException $e) {
+            $message = $e->getMessage();
+            $infoApi = array(
+
+            );
+           var_dump($message);
+            $error = error_get_last();
+            if ($error !== null) {
+                $infoApi['text']  = "File error : {$_SERVER['PHP_SELF']}\n";
+                $infoApi['text'] .= "Message error : {$message}\n";
+                $infoApi['text'] .= "====================================\n";
+                print_r($infoApi);
+            }
+            $this->connect = null;
+            return false;
+        }
+    }
+
+    /**
+     * @param $tblName
+     * @param $data struct same table multi row and column
+     */
+    public function executeInsertQueryMultiArr($tblName, $data)
+    {
+
+        if(count($data) == 0)
+        {
+            return;
+        }
+        if ($this->connect === null) {
+            $this->reconnect();
+        }
+        //$sth = $this->connect->prepare($query);
+        //$check = $sth->execute($prep);
+        $pdo = $this->connect;
+        $pdo->beginTransaction();
+
+        $datafields = array_keys( $data[0]);
+
+        foreach($data as $d){
+            $question_marks = [] ;
+            $insert_values = array();
+            $question_marks[] = '('  . $this->placeholders('?', sizeof($d)) . ')';
+            $insert_values = array_merge($insert_values, array_values($d));
+
+            $sql = "INSERT INTO {$tblName} (" . implode(",", $datafields ) . ") VALUES " .implode(',', $question_marks);
+
+            $stmt = $pdo->prepare ($sql);
+            try {
+                $stmt->execute($insert_values);
+            } catch (\PDOException $e){
+                $pdo->rollback();
+                echo $e->getMessage();
+            }
+
+        }
+
+
+        $pdo->commit();
+
+
+    }
+
+    /**
+     * Destruct connect mysql
+     * @return mixed return object connect database
+     */
+    public function __destruct()
+    {
+        $this->connect = null;
+    }
+    /**
+     * get name host of database
+     * @return string return database host name
+     */
+    public function getHost()
+    {
+        return $this->host;
+    }
+}
