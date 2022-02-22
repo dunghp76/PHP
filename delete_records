@@ -5,7 +5,7 @@
  *
  * @package 
  * @subpackage delete records
- * @copyright Copyright (c) 2022  daito! Corporation. All Rights Reserved.
+ * @copyright Copyright (c) 2022  ! Corporation. All Rights Reserved.
  * @author f5 >
  */
 namespace data\sales;
