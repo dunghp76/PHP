@@ -1,0 +1,367 @@
+<?php
+
+/**
+ * Run API Amazon to update quantity on store Amazon
+ * @package daito
+ * @subpackage amazon
+ * @copyright Copyright (c) 2016 daito! Corporation. All Rights Reserved.
+ * @author f5
+ */
+
+require __DIR__ . "/../autoload.inc";
+use daito\common\DbConnect as dbConnect;
+use daito\common\Common;
+
+$dbh = new dbConnect;
+
+//Check process for cronjob
+$common = new Common;
+//
+$query = "SELECT sku,register_date,update_delete "
+    . "FROM amazon_stock_delete WHERE status_flag='0' ";
+$result = $dbh->executeSelectQuery($query);
+$totalRun = count($result);
+
+if ($totalRun===0) {
+    print_r("No data\n");
+    exit;
+}
+//print_r($result);die();
+//Prepare data
+$txtContent = "";
+$arrItem    = array();
+$totalSuccess = 0;
+$totalFail    = 0;
+
+foreach ($result as $records) {
+    $txtContent .= "{$records["sku"]}	{$records["update_delete"]}	" . "\n";
+    $arrItem[$records["sku"]] = $records;
+}
+
+$feed = "sku	update-delete	fulfillment-channel
+$txtContent";
+
+// Amazon MWS Sample Program
+// PHP Amazon
+// H27.10.14
+$country = 'JP';// JP,US,CA
+$jobType = 2;// 1:_POST_FLAT_FILE_INVLOADER_DATA_,
+            //2:_POST_FLAT_FILE_PRICEANDQUANTITYONLY_UPDATE_DATA_,
+            //3:_POST_FLAT_FILE_LISTINGS_DATA_
+
+define("ALL_LIST_CHANGE", 0); // kanzen uwagaki:1 // tuikasyuusei:0
+define("HTTP_TRY_TIMER", 30);// HTTP accsess setup
+define("HTTP_TRY_NUM", 10);// HTTP accsess setup
+define("MWS_BASEURL_JP", 'https://mws.amazonservices.jp/');  // MWSJP
+
+if ($country == 'JP') {
+    // JP
+    $access_key_id      = MWS_ACCESS_KEY_JP;
+    $secret_access_key  = MWS_SECRET_KEY_JP;
+    $merchant_id        = MWS_SELLER_ID_JP;
+    $marketplace_id     = MWS_MARKETPLACE_JP;
+    $baseurl            = MWS_BASEURL_JP;
+} else {
+    exit;
+}
+$fileCount=2;
+// ***************** SubmitFeed ****************
+$params = array();
+$params['AWSAccessKeyId']    = $access_key_id;
+$params['Merchant']          = $merchant_id;
+$params['SignatureMethod']   = 'HmacSHA256';
+$params['SignatureVersion']  = '2';
+$params['Version']           = '2009-01-01';
+$params['Timestamp']         = gmdate('Y-m-d\TH:i:s\Z');    // Time Check ISO8601,UTC(GMT)
+$params['Action']            = 'SubmitFeed';
+$params['MarketplaceIdList.Id.1']    = $marketplace_id;
+
+if ($jobType == 1) {
+    $params['FeedType']      = '_POST_FLAT_FILE_INVLOADER_DATA_';
+    if (ALL_LIST_CHANGE == 1) {
+        $params['PurgeAndReplace']       = 'true';
+    } else {
+        $params['PurgeAndReplace']       = 'false';
+    }
+} elseif ($jobType == 2) {
+    $params['FeedType'] = '_POST_FLAT_FILE_PRICEANDQUANTITYONLY_UPDATE_DATA_';
+    $params['PurgeAndReplace']       = 'false';
+} elseif ($jobType == 3) {
+    $params['FeedType'] = '_POST_FLAT_FILE_LISTINGS_DATA_';
+    $params['PurgeAndReplace']       = 'false';
+}
+// make URL
+$url = makeUrl($params, $baseurl, $secret_access_key, 2);
+// file handle
+$feedHandle = @fopen('php://temp', 'rw+');
+fwrite($feedHandle, $feed);
+rewind($feedHandle);
+// name Header
+$stream = stream_get_contents($feedHandle);
+if ($stream===false) {
+    $updateStatus = updateRecord("NO DATA", $arrItem, $dbh);
+    print "No data\n";
+    exit();
+}
+$culc_md5 = base64_encode(md5($stream, true));
+rewind($feedHandle);
+$headParam = array(
+    "Expect: ",
+    "Accept: ",
+    "Transfer-Encoding: chunked",
+    "Content-MD5: $culc_md5",
+    "Content-Type: application/octet-stream"
+);
+// make UserAgent
+$userAgent  = 'YnetSubmitFeed/1.0';
+$userAgent .= ' (';
+$userAgent .= 'Language=PHP/' . phpversion();
+$userAgent .= '; ';
+$userAgent .= 'Platform=' . php_uname('s') . '/' . php_uname('m') . '/' . php_uname('r');
+$userAgent .= '; ';
+$userAgent .= 'MWSClientVersion=2011-08-01';
+
+// HTTP access HTTP_TRY_NUM try
+for ($i=1; $i <= HTTP_TRY_NUM; $i++) {
+    // CURL setup
+    $curlOpts_arry = array(
+        CURLOPT_POST              => true ,
+        CURLOPT_USERAGENT         => $userAgent ,
+        CURLOPT_VERBOSE           => true ,
+        CURLOPT_RETURNTRANSFER    => true ,
+        CURLOPT_SSL_VERIFYPEER    => true ,
+        CURLOPT_SSL_VERIFYHOST    => 2 ,
+        CURLOPT_URL               => $url ,
+        CURLOPT_HTTPHEADER        => $headParam ,
+        CURLOPT_INFILE            => $feedHandle ,
+        CURLOPT_UPLOAD            => true ,
+        CURLOPT_CUSTOMREQUEST     => "POST"
+    );
+    $curlOpts = curl_init();
+    curl_setopt_array($curlOpts, $curlOpts_arry);
+    // HTML accsess
+    if ($contents = curl_exec($curlOpts)) {
+        break;
+    }
+    printf("SubmitFeed curl_exe error=%s\n", curl_error($curlOpts)) ;
+    trigger_error(curl_error($curlOpts));
+    if ($i == HTTP_TRY_NUM) {
+        exit;
+    }
+    curl_close($curlOpts);
+}
+$amazonXml = simplexml_load_string($contents);
+
+// check respons head
+if (isset($amazonXml->SubmitFeedResult->FeedSubmissionInfo->FeedSubmissionId)) {
+    $FeedSubmissionId    = $amazonXml->SubmitFeedResult->FeedSubmissionInfo->FeedSubmissionId;
+} else {
+    $status="SubmitFeed no good answer";
+    printf($status."\n");
+//    updateRecord($status, $arrItem, $dbh);
+    exit;
+}
+// write to log
+printf("MWS[SubmitFeed UPLOAD finish FeedSubmissionId=%s \n", $FeedSubmissionId);
+// ***************** GetFeedSubmissionList ****************
+// do until DONE
+while (true) {
+    $params=array();
+    $params['AWSAccessKeyId']    = $access_key_id;
+    $params['Merchant']          = $merchant_id;
+    $params['SignatureMethod']   = 'HmacSHA256';
+    $params['SignatureVersion']  = '2';
+    $params['Version']           = '2009-01-01';
+    $params['Timestamp']         = gmdate('Y-m-d\TH:i:s\Z');    // Time Check ISO8601,UTC(GMT)
+    $params['Action']            = 'GetFeedSubmissionList';
+    $params['FeedSubmissionIdList.Id.1']    = $FeedSubmissionId;
+    // name URL
+    $url = makeUrl($params, $baseurl, $secret_access_key, 1);
+    // HTML accsess
+    $amazonXml = accessHttp($url, 0, $arrItem, $dbh);
+    // FeedProcessingStatusã®å–å¾—
+    if (isset($amazonXml->GetFeedSubmissionListResult->FeedSubmissionInfo->FeedProcessingStatus)) {
+        $FeedProcessingStatus    = $amazonXml->GetFeedSubmissionListResult->FeedSubmissionInfo->FeedProcessingStatus;
+    } else {
+        $status="GetFeedSubmissionList no good answer";
+//        updateRecord($status, $arrItem, $dbh);
+        printf($status."\n");
+        exit;
+    }
+
+    if ($FeedProcessingStatus == '_DONE_') {
+        // write to log
+        updateRecord("OK", $arrItem, $dbh);
+        printf("MWS[GetFeedSubmissionList _DONE_  FeedSubmissionId=%s with %s records\n", $FeedSubmissionId, $totalRun);
+        break;
+    } elseif ($FeedProcessingStatus =='_AWAITING_ASYNCHRONOUS_REPLY_') {
+        updateRecord("_AWAITING_ASYNCHRONOUS_REPLY_", $arrItem, $dbh);
+        printf("MWS[GetFeedSubmissionList _AWAITING_ASYNCHRONOUS_REPLY_  "
+            . "FeedSubmissionId=%s with %s records\n", $FeedSubmissionId, $totalRun);
+        break;
+    } elseif ($FeedProcessingStatus == '_CANCELLED_') {
+        updateRecord("_CANCELLED_", $arrItem, $dbh);
+        printf("MWS[GetFeedSubmissionList _CANCELLED_  FeedSubmissionId=%s"
+            . " with %s records\n", $FeedSubmissionId, $totalRun);
+        break;
+    } elseif ($FeedProcessingStatus == '_IN_SAFETY_NET_') {
+        updateRecord("_IN_SAFETY_NET_", $arrItem, $dbh);
+        printf("MWS[GetFeedSubmissionList _IN_SAFETY_NET_  FeedSubmissionId=%s"
+            . " with %s records\n", $FeedSubmissionId, $totalRun);
+        break;
+    }
+    sleep(80);
+}
+
+// ***************** GetFeedSubmissionResult ****************
+$params = array();
+$params['AWSAccessKeyId']    = $access_key_id;
+$params['Merchant']          = $merchant_id;
+$params['SignatureMethod']   = 'HmacSHA256';
+$params['SignatureVersion']  = '2';
+$params['Version']           = '2009-01-01';
+$params['Timestamp']         = gmdate('Y-m-d\TH:i:s\Z');    // Time Check ISO8601,UTC(GMT)
+$params['Action']            = 'GetFeedSubmissionResult';
+$params['FeedSubmissionId']  = $FeedSubmissionId;
+// make URL
+$url = makeUrl($params, $baseurl, $secret_access_key, 1);
+// HTML access
+$get_contents    = accessHttp($url, 1, $arrItem, $dbh);
+//print_r($get_contents);
+
+// ***************** function ****************
+/**
+ * HTTP accsess
+ * @param string $url  Status for updating
+ * @param int $jobType  Job type
+ * @param array $arrItem  Array contains SKU and registed date of product
+ * @return string $amazonXml XML code of API after process was completed
+*/
+function accessHttp($url, $jobType, $arrItem, $dbh)
+{
+//    $http_response_header = null;
+//    $response = @file_get_contents($url);
+    $http     = curl_init($url);
+    curl_setopt($http, CURLOPT_RETURNTRANSFER, 1);
+    $response = curl_exec($http);
+    $httpCode = (int)curl_getinfo($http, CURLINFO_HTTP_CODE);
+    curl_close($http);
+    if ($response === false) {
+        updateRecord("NO GET DATA", $arrItem, $dbh);
+        printf("ERROR : NO GET DATA!\n");
+    }
+    // HTTP error
+//    $pos = strpos($http_response_header[0], '200');
+    if ($httpCode !== 200) {
+        // error
+        if ($httpCode === 400) {
+            // ERROR
+            updateRecord("ERROR : HTTP ACCESS 400!", $arrItem, $dbh);
+            printf("ERROR : HTTP ACCESS 400!\n");
+        } elseif ($httpCode === 403) {
+            // ERROR
+            updateRecord("ERROR : HTTP ACCESS 403!", $arrItem, $dbh);
+            printf("ERROR : HTTP ACCESS 403!\n");
+        } elseif ($httpCode === 404) {
+            updateRecord("ERROR : HTTP ACCESS 404!", $arrItem, $dbh);
+            printf("ERROR : HTTP ACCESS 404!\n");
+        } elseif ($httpCode === 503) {
+            updateRecord("ERROR : 503 Service Unavailable! "
+            . "You exceeded your quota of 80.0 requests per 1 hour "
+            . "for operation Feeds/2009-01-01/GetFeedSubmissionList", $arrItem, $dbh);
+            printf("ERROR : 503 Service Unavailable! You exceeded your quota of 80.0 requests per 1 hour "
+                . "for operation Feeds/2009-01-01/GetFeedSubmissionList.\n");
+        } else {
+            updateRecord("ERROR : HTTP ACCESS $httpCode!", $arrItem, $dbh);
+            printf("ERROR : HTTP ACCESS $httpCode!\n");
+        }
+
+    // HTTP OK
+    } else {
+        // XML can not read   "$jobType = 1"
+        if ($jobType == 1) {
+            return $response;
+        }
+        // MWS error
+        $response = preg_replace("/ns2:/", "ns2_", $response);
+        $amazonXml = simplexml_load_string($response);
+        if (isset($amazonXml->Error->Message)) {
+            printf("ERROR : HTTP ACCESS MWS i=%d!\n");
+        } else {
+            return $amazonXml;
+        }
+    }
+}
+
+// ***************** function ****************
+/**
+ * Convert URL with parameters
+ * @param array $params  value that need for access URL API
+ * @param string $baseurl  URL of API
+ * @param string $secretAccessKey  secrect access key
+ * @param int $jobType job type
+ * @return string $url URL was converted
+*/
+function makeUrl($params, $baseurl, $secretAccessKey, $jobType)
+{
+    // sort
+    ksort($params);
+    // add URL
+    $optionString = '';
+    foreach ($params as $k => $v) {
+        // add URL and URL encode
+        $optionString .= '&'.urlencode_rfc3986($k).'='.urlencode_rfc3986($v);
+    }
+    // remove first &
+    $optionString = substr($optionString, 1);
+    // make URL
+    $parsedUrl     = parse_url($baseurl);
+    if ($jobType == 2) {
+        $stringToSign = "POST\n{$parsedUrl['host']}\n{$parsedUrl['path']}\n{$optionString}";
+    } else {
+        $stringToSign = "GET\n{$parsedUrl['host']}\n{$parsedUrl['path']}\n{$optionString}";
+    }
+    //- HMAC-SHA256 BASE64
+    $signature      = base64_encode(hash_hmac('sha256', $stringToSign, $secretAccessKey, true));
+    // - add signature
+    $url            = $baseurl.'?'.$optionString.'&Signature='.urlencode_rfc3986($signature);
+    // returen URL
+    return $url;
+}
+/**
+ * RFC3986 URL encode
+ * @param string $str  value that need for access to URL API
+ * @return string $str string was converted
+*/
+function urlencode_rfc3986($str)
+{
+    return str_replace('%7E', '~', rawurlencode($str));
+}
+/**
+ * Exc sql update
+ * @param string $status status of process
+ * @param array $result contain item array to update
+ * @return boolean
+*/
+function updateRecord($status, $result, $dbh)
+{
+    foreach ($result as $item) {
+        $sku    = $dbh->connect->quote($item["sku"]);
+        $query  = "
+            UPDATE
+                `amazon_stock_delete`
+            SET
+                status_flag = '{$status}',
+                end_date    = now()
+            WHERE
+                sku = $sku
+            AND
+                register_date = '{$item["register_date"]}'
+        ";
+        $flg = $dbh->executeUpdateQuery($query);
+        if ($flg ===  false) {
+            return false;
+        }
+    }
+    return true;
+}
