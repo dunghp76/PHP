@@ -1,0 +1,15 @@
+<?php
+
+/**
+ * Process calcPrice On Gufu
+ * @subpackage calculating price
+ * @author f5
+ */
+namespace PriceUpdate;
+
+require __DIR__ . "/../autoload.inc";
+require __DIR__ . "/GetPriceCheckList.php";
+
+$calcPriceFunc = new GetPriceCheckList();
+$calcPriceFunc->getPriceCheckList('sales.amazon','price_check.amazon_','register_date');
+
