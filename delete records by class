@@ -1,0 +1,125 @@
+<?php
+
+/**
+ * Process PriceCheckList On GPC
+ *
+ * @package daito
+ * @subpackage calculating price
+ * @copyright Copyright (c) 2022  daito! Corporation. All Rights Reserved.
+ * @author f5 dung_d@monotos.biz>
+ */
+namespace PriceUpdate;
+
+require_once __DIR__ . "/../common/DbConnectGpc.php";
+
+use \data\pricing_method\common\DbConnectGpc;
+
+if (!function_exists('echoNL')) {
+
+    function echoNL($msg)
+    {
+        $dateT = date("Y-m-d H:i:s") . "  ";
+        if (is_array($msg)) {
+            echo $dateT . "\n";
+            var_dump($msg);
+        } else {
+            echo $dateT . $msg . "\n";
+        }
+    }
+
+}
+
+class GetPriceCheckList extends DbConnectGpc
+{
+    /**
+     * Get data list
+     * @param string
+     * @param string
+     * @return array
+     */
+    public function  getPriceCheckList($tableNameSelect,$tableNameDel,$conditionField)
+    {
+        $start = microtime(true);
+        echoNL("Start delete " . __FUNCTION__);
+
+        do {
+            $query = "
+            SELECT distinct(a.product_code) as product_code
+            from $tableNameSelect as a
+
+	    LIMIT 5000;
+	    ";
+            $result = $this->executeSelectQuery($query);
+           // echoNL($result);
+            $count = count($result);
+            $totalCalc = 0;
+            if ($count === 0) {
+                break;
+            }
+
+            $totalCalc = $totalCalc + $count;
+            $arQRCal = [];
+            foreach ($result as $item) {
+
+                $this->deletePriceCheckList($arQRCal, $tableNameDel,$conditionField,"'" . $item['product_code'] . "'");
+                $count--;
+            }
+            echoNL("  begin delete....".$tableNameDel);
+            $start1 = microtime(true);
+            $this->updateMultiQuery($arQRCal,200);
+            $spendTimeCal = round(microtime(true) - $start1, 2);
+            //echoNL($arQRCal );
+            echoNL("     total delete records:" . count($arQRCal));
+            echoNL("     delete records With spend time:" . $spendTimeCal);
+
+        } while ($count > 0);
+
+        $spendTime = round(microtime(true) - $start, 2);
+        // write logs
+        echoNL("SUM records calc: " . $totalCalc);
+        echoNL("Done delete " . __FUNCTION__ . " With spend time:" . $spendTime);
+
+        return true;
+    }
+    //====================
+    /**
+     * Update data
+     * @param  array   $productCode
+     * @param  string  $
+     * @return boolean
+     */
+    public function deletePriceCheckList(&$arQRCal,$tableNameDel,$conditionField,$productCode)
+    {
+        $query = "
+            delete b
+            from
+            $tableNameDel as b
+	    where
+            date(b.$conditionField)=date_sub(current_date,interval 1 month)
+	    and
+            b.product_code = $productCode;";
+
+        $arQRCal[] = $query;
+
+        //return $this->executeUpdateQuery($query);
+    }
+
+    //====================
+    /**
+     * Multi update
+     * @param  array   $productCode
+     * @param  string  $
+     * @return boolean
+     */
+    private function updateMultiQuery($arQRCal, $sizeQuery)
+    {
+        $listOfAr = array_chunk($arQRCal, $sizeQuery);
+        foreach ($listOfAr as $arQuery) {
+            $queryRun = implode("", $arQuery);
+            //var_dump($queryRun);
+            $this->excuteMultiQuery($queryRun);
+            echoNL("delete updateMultiQuery:" . $sizeQuery);
+
+        }
+    }
+}
