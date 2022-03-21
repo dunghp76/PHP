@@ -1,0 +1,25 @@
+create domain in:
+edit file add new :
+/etc/httpd/conf.d/manager.conf
+#nvtrong addnew domain
+<VirtualHost *:80>
+DocumentRoot "/var/www/hrnb2021/horunba/public"
+ServerName hrnb1.dvntest.tk
+ErrorLog "/var/log/httpd/hrnb1-error_log"
+CustomLog "/var/log/httpd/hrnb1-access_log" combined
+<Directory "/var/www/hrnb2021/horunba/public">
+DirectoryIndex index.html index.php
+Options FollowSymLinks
+AllowOverride All
+Require all granted
+</Directory>
+
+</VirtualHost>
+restart http
+run : > service httpd restart
+create https:
+run: >?sudo /var/opt/letsencrypt/letsencrypt-auto --apache --debug
+server macaron : sudo certbot --apache d macaron.dvntest.tk
+----------
+renew ssl
+/var/opt/letsencrypt/letsencrypt-auto renew --debug
