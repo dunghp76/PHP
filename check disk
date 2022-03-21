@@ -3,3 +3,28 @@
 NAME MAJ:MIN RM SIZE RO TYPE MOUNTPOINT
 xvda 202:0 0 150G 0 disk
 └─xvda1 202:1 0 100G 0 part /
+2.Up grow part
+2.1 [root@macaron ec2-user]# sudo growpart /dev/xvda 1
+CHANGED: partition=1 start=4096 old: size=209711071 end=209715167 new: size=314568671 end=314572767
+
+2.1 sudo xfs_growfs -d /
+meta-data=/dev/xvda1             isize=512    agcount=51, agsize=524159 blks
+         =                       sectsz=512   attr=2, projid32bit=1
+         =                       crc=1        finobt=1 spinodes=0
+data     =                       bsize=4096   blocks=26213883, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0 ftype=1
+log      =internal               bsize=4096   blocks=2560, version=2
+         =                       sectsz=512   sunit=0 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+data blocks changed from 26213883 to 39321083
+3. check disk
+[root@macaron ec2-user]# df -h
+Filesystem Size Used Avail Use% Mounted on
+devtmpfs 2.0G 0 2.0G 0% /dev
+tmpfs 2.0G 0 2.0G 0% /dev/shm
+tmpfs 2.0G 66M 1.9G 4% /run
+tmpfs 2.0G 0 2.0G 0% /sys/fs/cgroup
+/dev/xvda1 150G 96G 55G 64% /
+tmpfs 395M 0 395M 0% /run/user/1000
+tmpfs 395M 0 395M 0% /run/user/0
