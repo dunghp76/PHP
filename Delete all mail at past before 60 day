@@ -1,0 +1,3 @@
+Delete all mail at past before 60 day
+~]# doveadm expunge -A mailbox % savedbefore 60d
+(Can use this command: doveadm expunge -u online mailbox INBOX SENTBEFORE 1-Jan-2011)
