@@ -1,3 +1,15 @@
-Delete all mail at past before 60 day
+Solved:
+① Change Max of mail_uid to 100000000000
+~]# vi /etc/dovecot/conf.d/10-mail.conf
+In this file
+change: mail_uid = 1000000
+h1. ⇓
+to: mail_uid = 100000000000
+
+② Delete all mail at past before 60 day
 ~]# doveadm expunge -A mailbox % savedbefore 60d
 (Can use this command: doveadm expunge -u online mailbox INBOX SENTBEFORE 1-Jan-2011)
+
+③ Restart Postfix and Dovecot
+]# /etc/init.d/postfix restart
+]# /etc/init.d/dovecot restart
