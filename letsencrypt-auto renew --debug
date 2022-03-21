@@ -1,0 +1,30 @@
+RUN: [root@ip-172-30-0-209 ~]# /var/opt/letsencrypt/letsencrypt-auto renew --debug
+Error content:
+Skipping bootstrap because certbot-auto is deprecated on this system.
+Your system is not supported by certbot-auto anymore.
+Certbot cannot be installed.
+Please visit https://certbot.eff.org/ to check for other alternatives.
+
+Solve:
+① Install python36
+[root@ip-172-30-0-209 ~]# sudo yum -y install python36 python36-pip augeas-libs
+
+② Update PIP and install certbot-apache
+
+[root@ip-172-30-0-209 ~]# sudo python3 -m venv /opt/certbot/
+[root@ip-172-30-0-209 ~]# sudo /opt/certbot/bin/pip install --upgrade pip
+[root@ip-172-30-0-209 ~]# sudo /opt/certbot/bin/pip install certbot certbot-apache
+[root@ip-172-30-0-209 ~]# sudo ln -s /opt/certbot/bin/certbot /usr/bin/certbot
+
+③ Make SSL by certbot
+[root@ip-172-30-0-209 ~]# sudo certbot certonly --debug -n -m [MyEmail] --agree-tos --standalone -d [host.mydomain] --keep-until-expiring
+
+If below error occurred
+Problem binding to port 80: Could not bind to IPv4 or IPv6.
+
+Then run this command
+[root@ip-172-30-0-209 ~]# service httpd stop
+
+And re-execute 【③ Make SSL by certbot】
+After that run below command
+[root@ip-172-30-0-209 ~]# service httpd start
