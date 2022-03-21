@@ -1,0 +1,8 @@
+When mail_uid =1000000 then  can not get mail, because 1000000 is max of mail_uid
+Solved:
+① Change Max of mail_uid to 100000000000
+~]# vi /etc/dovecot/conf.d/10-mail.conf
+In this file
+change: mail_uid = 1000000
+h1. ⇓
+to: mail_uid = 100000000000
