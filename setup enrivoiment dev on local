@@ -1,0 +1,7 @@
+1.node.js install
+2.phpStorm install
+3.copy source code (if have)
+4.open phpStorm with source code
+5.input on npm install --global node-gyp on terminal (check exits python)
+6.npm install
+7.build source :npm run dev
